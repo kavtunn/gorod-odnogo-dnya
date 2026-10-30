@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+.impeccable/
+web/node_modules/
+web/dist/
+archive/city-one-day-react/node_modules/
+archive/city-one-day-react/dist/
