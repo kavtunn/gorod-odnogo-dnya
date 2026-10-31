@@ -36,14 +36,23 @@ Thumbs.db
 *.sln
 *.sw?
 
-# Cursor / local agent tooling (не часть приложения)
+# Cursor / local agent tooling
 .cursor/
 
-# Impeccable design process (briefs, mocks, review)
+# Impeccable design process
 .impeccable/
 
-# Документация продукта/дизайна — не нужна для сборки и работы сайта
+# Docs / deploy notes — не нужны в репо для работы сайта
 docs/
+README.md
+DEPLOY.md
 
-# Legacy-копии (не источник правды; сайт = web/)
+# Legacy (не источник правды; сайт = web/)
 archive/
+/css/
+/fonts/
+/html/
+/img/
+/js/
+/json/
+/index.html
