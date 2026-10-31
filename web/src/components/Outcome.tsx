@@ -1,4 +1,4 @@
-import type { Choice, ChoiceOutcome } from '../types'
+import type { Choice, ChoiceOutcome, StepKind } from '../types'
 
 type Props = {
   outcome: ChoiceOutcome
@@ -6,14 +6,22 @@ type Props = {
   tip: string
 }
 
-export function Outcome({ outcome, consequence, tip }: Props) {
-  const tag = outcome === 'safe' ? 'Безопасно' : outcome === 'risky' ? 'Риск' : 'Урок'
-  const anim =
-    outcome === 'risky' ? 'anim-shake' : outcome === 'safe' ? 'anim-safe' : 'anim-learn'
+function outcomeTag(outcome: ChoiceOutcome): string {
+  if (outcome === 'safe') return 'Безопасно'
+  if (outcome === 'risky') return 'Риск'
+  return 'Урок'
+}
 
+function outcomeAnim(outcome: ChoiceOutcome): string {
+  if (outcome === 'risky') return 'anim-shake'
+  if (outcome === 'safe') return 'anim-safe'
+  return 'anim-learn'
+}
+
+export function Outcome({ outcome, consequence, tip }: Props) {
   return (
-    <div className={`result ${outcome} ${anim}`}>
-      <div className={`tag ${outcome}`}>{tag}</div>
+    <div className={`result ${outcome} ${outcomeAnim(outcome)}`}>
+      <div className={`tag ${outcome}`}>{outcomeTag(outcome)}</div>
       <p>{consequence}</p>
       <p className="muted">{tip}</p>
     </div>
@@ -30,21 +38,23 @@ export function outcomeFromChoice(choice: Choice) {
   )
 }
 
-export function stepHint(kind: string): string {
+export function stepHint(kind: StepKind): string {
   switch (kind) {
     case 'narration':
       return 'Прочитай текст и нажми «Дальше».'
     case 'choice':
-      return 'Выбери один вариант — увидишь следствие решения.'
+      return 'Выбери один вариант — увидишь следствие.'
     case 'hotspot':
-      return 'Нажимай на важные места на фото. Нужны все верные точки.'
+      return 'Отметь места на фото — любой набор даст свой исход.'
     case 'checklist':
-      return 'Отметь только то, что действительно нужно по ситуации.'
+      return 'Отметь любой набор — у каждого будет свой исход.'
     case 'sort':
-      return 'Сначала выбери предмет, потом контейнер. Потом — «Проверить».'
+      return 'Сначала предмет, потом бак — затем «Проверить».'
     case 'chat':
       return 'Выбери ответ в переписке. Код из СМС никому не отдают.'
-    default:
-      return 'Следуй подсказке на экране.'
+    default: {
+      const _never: never = kind
+      return _never
+    }
   }
 }

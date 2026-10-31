@@ -9,10 +9,16 @@ function withBase(path: string): string {
 export async function loadCity(): Promise<CityData> {
   const res = await fetch(withBase('json/city.json'))
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
   const data = (await res.json()) as CityData
-  data.locations = data.locations.map((loc) => ({
-    ...loc,
-    image: withBase(loc.image.replace(/^\//, '').replace(/^\.\.\//, '')),
-  }))
+
+  data.locations = data.locations.map((loc) => {
+    const imagePath = loc.image.replace(/^\//, '').replace(/^\.\.\//, '')
+    return {
+      ...loc,
+      image: withBase(imagePath),
+    }
+  })
+
   return data
 }

@@ -1,6 +1,6 @@
-import type { PhaseId, ProgressState } from '../types'
+import type { ProgressState } from '../types'
 
-export const STORAGE_KEY = 'gorod-odnogo-dnya-v1'
+export const STORAGE_KEY = 'gorod-odnogo-dnya-v2'
 
 export const initialProgress: ProgressState = {
   playerName: '',
@@ -15,10 +15,9 @@ export const initialProgress: ProgressState = {
 
 export function loadProgress(): ProgressState {
   try {
-    return {
-      ...initialProgress,
-      ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'),
-    }
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { ...initialProgress }
+    return { ...initialProgress, ...JSON.parse(raw) }
   } catch {
     return { ...initialProgress }
   }
@@ -30,13 +29,4 @@ export function saveProgress(state: ProgressState): void {
 
 export function clearProgress(): void {
   localStorage.removeItem(STORAGE_KEY)
-}
-
-export function isPhaseId(value: string): value is PhaseId {
-  return (
-    value === 'morning' ||
-    value === 'school' ||
-    value === 'afternoon' ||
-    value === 'evening'
-  )
 }

@@ -1,14 +1,13 @@
-import type { Choice, CityData, SceneStep } from '../types'
-import { Outcome, outcomeFromChoice, stepHint } from './Outcome'
-
-type StepLocal = {
-  picked?: Choice
-  found?: string[]
-  checked?: string[]
-  selectedItem?: string | null
-  placed?: Record<string, string>
-  sortDone?: boolean
-}
+import type { ReactNode } from 'react'
+import { playOutcome, playPlace } from '../audio/sfx'
+import type { Choice, CityData, SceneStep, StepLocal } from '../types'
+import { flashPick } from '../utils/flashPick'
+import { outcomeFromChoice, stepHint } from './Outcome'
+import {
+  checklistChoice,
+  hotspotChoice,
+  sortChoice,
+} from './sceneOutcomes'
 
 type Props = {
   city: CityData
@@ -21,7 +20,40 @@ type Props = {
   onNextStep: () => void
   onDecide: (choice: Choice, step: SceneStep) => void
   stepLocal: StepLocal
-  setStepLocal: (patch: StepLocal | ((prev: StepLocal) => StepLocal)) => void
+  setStepLocal: (next: StepLocal | ((prev: StepLocal) => StepLocal)) => void
+}
+
+export type { StepLocal }
+
+function saveChoice(
+  choice: Choice,
+  step: SceneStep,
+  onDecide: Props['onDecide'],
+  setStepLocal: Props['setStepLocal'],
+  extra: Partial<StepLocal> = {},
+) {
+  playOutcome(choice.outcome)
+  onDecide(choice, step)
+  setStepLocal((prev) => ({ ...prev, ...extra, picked: choice }))
+}
+
+function OutcomeBlock({
+  choice,
+  buttonLabel,
+  onNext,
+}: {
+  choice: Choice
+  buttonLabel: string
+  onNext: () => void
+}) {
+  return (
+    <div className="stack anim-step">
+      {outcomeFromChoice(choice)}
+      <button type="button" className="btn primary" onClick={onNext}>
+        {buttonLabel}
+      </button>
+    </div>
+  )
 }
 
 export function SceneView({
@@ -42,23 +74,33 @@ export function SceneView({
 
   const loc = city.locations.find((l) => l.id === scene.locationId)
   const artTitle =
-    (city.artTitles && city.artTitles[scene.locationId]) || loc?.name || scene.locationId
+    city.artTitles?.[scene.locationId] || loc?.name || scene.locationId
   const artSrc =
     loc?.image || `${import.meta.env.BASE_URL}img/${scene.locationId}.jpg`
+  const progress =
+    ((stepIndex + (sceneDone ? 1 : 0)) / scene.steps.length) * 100
 
   if (sceneDone) {
     return (
-      <section className="panel stack anim-scene">
-        <figure className="scene-art anim-scene">
+      <section className="panel stack anim-scene scene-done">
+        <figure className="scene-art scene-art-live">
           <img src={artSrc} alt={artTitle} width={1200} height={700} />
           <figcaption>{artTitle}</figcaption>
         </figure>
-        <h1>{scene.title}</h1>
-        <p>{scene.summary}</p>
-        <div className="map-cta">
+        <div className="scene-progress" aria-hidden="true">
+          <div
+            className="scene-progress-fill"
+            style={{ transform: 'scaleX(1)' }}
+          />
+        </div>
+        <h1 className="anim-in">{scene.title}</h1>
+        <p className="anim-in" style={{ animationDelay: '0.08s' }}>
+          {scene.summary}
+        </p>
+        <div className="map-cta anim-in" style={{ animationDelay: '0.14s' }}>
           {endedDay ? (
             <button type="button" className="btn primary" onClick={onMap}>
-              К финалу дня
+              К итогам дня
             </button>
           ) : (
             <button type="button" className="btn primary" onClick={onNextScene}>
@@ -77,18 +119,26 @@ export function SceneView({
 
   return (
     <section className="panel stack anim-scene">
-      <figure className="scene-art anim-scene">
+      <figure className="scene-art scene-art-live" key={sceneId}>
         <img src={artSrc} alt={artTitle} width={1200} height={700} />
         <figcaption>{artTitle}</figcaption>
       </figure>
+      <div className="scene-progress" aria-hidden="true">
+        <div
+          className="scene-progress-fill"
+          style={{ transform: `scaleX(${Math.max(progress, 8) / 100})` }}
+        />
+      </div>
       <p className="muted">
         {loc?.name} · {city.moduleLabels[scene.module]} · шаг {stepIndex + 1}/
         {scene.steps.length}
       </p>
       <h1>{scene.title}</h1>
       <StepBody
-        city={city}
+        key={`${sceneId}-${step.id}-${stepIndex}`}
         step={step}
+        stageSrc={artSrc}
+        stageAlt={artTitle}
         stepLocal={stepLocal}
         setStepLocal={setStepLocal}
         onDecide={onDecide}
@@ -99,27 +149,29 @@ export function SceneView({
 }
 
 function StepBody({
-  city,
   step,
+  stageSrc,
+  stageAlt,
   stepLocal,
   setStepLocal,
   onDecide,
   onNextStep,
 }: {
-  city: CityData
   step: SceneStep
+  stageSrc: string
+  stageAlt: string
   stepLocal: StepLocal
-  setStepLocal: (patch: StepLocal | ((prev: StepLocal) => StepLocal)) => void
-  onDecide: (choice: Choice, step: SceneStep) => void
+  setStepLocal: Props['setStepLocal']
+  onDecide: Props['onDecide']
   onNextStep: () => void
 }) {
-  const tip = <p className="step-hint">{stepHint(step.kind)}</p>
+  const tip = <p className="step-hint anim-in">{stepHint(step.kind)}</p>
 
   if (step.kind === 'narration') {
     return (
       <div className="stack anim-step">
         {tip}
-        <p>{step.text}</p>
+        <p className="narration-text">{step.text}</p>
         <button type="button" className="btn primary" onClick={onNextStep}>
           Дальше
         </button>
@@ -130,27 +182,29 @@ function StepBody({
   if (step.kind === 'choice') {
     if (stepLocal.picked) {
       return (
-        <div className="stack">
-          {outcomeFromChoice(stepLocal.picked)}
-          <button type="button" className="btn primary" onClick={onNextStep}>
-            Продолжить
-          </button>
-        </div>
+        <OutcomeBlock
+          choice={stepLocal.picked}
+          buttonLabel="Продолжить"
+          onNext={onNextStep}
+        />
       )
     }
+
     return (
       <div className="stack anim-step">
         {tip}
         <p>{step.text}</p>
         <div className="choice-list">
-          {(step.choices || []).map((c) => (
+          {(step.choices || []).map((c, i) => (
             <button
               key={c.id}
               type="button"
-              className="btn"
-              onClick={() => {
-                onDecide(c, step)
-                setStepLocal({ ...stepLocal, picked: c })
+              className="btn pickable choice-enter"
+              style={{ animationDelay: `${0.06 + i * 0.06}s` }}
+              onClick={(e) => {
+                flashPick(e.currentTarget, 220, () => {
+                  saveChoice(c, step, onDecide, setStepLocal)
+                })
               }}
             >
               {c.label}
@@ -162,227 +216,56 @@ function StepBody({
   }
 
   if (step.kind === 'hotspot') {
-    const need = (step.hotspots || []).filter((h) => h.correct).length
-    const found = stepLocal.found || []
-    const good = (step.hotspots || []).filter(
-      (h) => h.correct && found.includes(h.id),
-    ).length
-    const tips = (step.hotspots || [])
-      .filter((h) => found.includes(h.id))
-      .map((h) => h.tip)
-      .join(' · ')
-    const road = city.locations.find((l) => l.id === 'road')
-
     return (
-      <div className="stack anim-step">
-        {tip}
-        <p>{step.text}</p>
-        <div className="hotspot-stage">
-          <img
-            src={road?.image || `${import.meta.env.BASE_URL}img/road.jpg`}
-            alt={city.artTitles.road || 'Дорога'}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              opacity: 0.9,
-            }}
-          />
-          {(step.hotspots || []).map((h) => {
-            const is = found.includes(h.id)
-            const cls = !is ? 'hotspot' : h.correct ? 'hotspot good' : 'hotspot bad'
-            return (
-              <button
-                key={h.id}
-                type="button"
-                className={`${cls}${is ? ' anim-pop' : ''}`}
-                style={{ left: `${h.x}%`, top: `${h.y}%` }}
-                onClick={() => {
-                  if (found.includes(h.id)) return
-                  setStepLocal({ ...stepLocal, found: found.concat(h.id) })
-                }}
-              >
-                {h.label}
-              </button>
-            )
-          })}
-        </div>
-        {tips ? <p className="muted">{tips}</p> : null}
-        <button
-          type="button"
-          className="btn primary"
-          disabled={good < need}
-          onClick={onNextStep}
-        >
-          Дальше ({good}/{need})
-        </button>
-      </div>
+      <HotspotStep
+        step={step}
+        tip={tip}
+        stageSrc={stageSrc}
+        stageAlt={stageAlt}
+        stepLocal={stepLocal}
+        setStepLocal={setStepLocal}
+        onDecide={onDecide}
+        onNextStep={onNextStep}
+      />
     )
   }
 
   if (step.kind === 'checklist') {
-    const checked = stepLocal.checked || []
-    const required = (step.checklist || []).filter((c) => c.required).map((c) => c.id)
-    const ok =
-      required.every((id) => checked.includes(id)) &&
-      (step.checklist || []).every((c) =>
-        c.required ? checked.includes(c.id) : !checked.includes(c.id),
-      )
-
     return (
-      <div className="stack anim-step">
-        {tip}
-        <p>{step.text}</p>
-        <div className="stack checklist">
-          {(step.checklist || []).map((c) => (
-            <label key={c.id}>
-              <input
-                type="checkbox"
-                checked={checked.includes(c.id)}
-                onChange={(e) => {
-                  const next = e.target.checked
-                    ? checked.concat(c.id)
-                    : checked.filter((x) => x !== c.id)
-                  setStepLocal({ ...stepLocal, checked: next })
-                }}
-              />
-              <span>{c.label}</span>
-            </label>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="btn primary"
-          disabled={!ok}
-          onClick={onNextStep}
-        >
-          Подтвердить
-        </button>
-      </div>
+      <ChecklistStep
+        step={step}
+        tip={tip}
+        stepLocal={stepLocal}
+        setStepLocal={setStepLocal}
+        onDecide={onDecide}
+        onNextStep={onNextStep}
+      />
     )
   }
 
   if (step.kind === 'sort') {
-    if (stepLocal.sortDone && step.sort) {
-      const placed = stepLocal.placed || {}
-      const allOk = step.sort.items.every((i) => placed[i.id] === i.bin)
-      return (
-        <div className="stack">
-          <Outcome
-            outcome={allOk ? 'safe' : 'learn'}
-            consequence={
-              allOk
-                ? 'Все на месте. Берег чище.'
-                : 'Часть вещей не туда. Грязное и чистое не смешивают.'
-            }
-            tip="Не уверен — в смешанные."
-          />
-          <button type="button" className="btn primary" onClick={onNextStep}>
-            Дальше
-          </button>
-        </div>
-      )
-    }
-
-    const placed = stepLocal.placed || {}
-    const selected = stepLocal.selectedItem || null
-
     return (
-      <div className="stack anim-step">
-        {tip}
-        <p>{step.text}</p>
-        <div className="stack">
-          {(step.sort?.items || [])
-            .filter((i) => !placed[i.id])
-            .map((i) => (
-              <button
-                key={i.id}
-                type="button"
-                className={`sort-item${selected === i.id ? ' bin active' : ''}`}
-                onClick={() => setStepLocal({ ...stepLocal, selectedItem: i.id })}
-              >
-                {i.label}
-              </button>
-            ))}
-        </div>
-        <div className="bins">
-          {(step.sort?.bins || []).map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              className="bin"
-              onClick={() => {
-                if (!selected) return
-                setStepLocal({
-                  ...stepLocal,
-                  placed: { ...placed, [selected]: b.id },
-                  selectedItem: null,
-                })
-              }}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="btn primary"
-          disabled={
-            Object.keys(placed).length < (step.sort?.items.length || 0)
-          }
-          onClick={() => setStepLocal({ ...stepLocal, sortDone: true })}
-        >
-          Проверить
-        </button>
-      </div>
+      <SortStep
+        step={step}
+        tip={tip}
+        stepLocal={stepLocal}
+        setStepLocal={setStepLocal}
+        onDecide={onDecide}
+        onNextStep={onNextStep}
+      />
     )
   }
 
   if (step.kind === 'chat') {
-    if (stepLocal.picked) {
-      return (
-        <div className="stack">
-          {outcomeFromChoice(stepLocal.picked)}
-          <button type="button" className="btn primary" onClick={onNextStep}>
-            Дальше
-          </button>
-        </div>
-      )
-    }
     return (
-      <div className="stack anim-step">
-        {tip}
-        <p>{step.text}</p>
-        <div className="chat">
-          <strong>{step.chat?.npcName}</strong>
-          {(step.chat?.messages || []).map((m, i) => (
-            <div
-              key={`${m.from}-${i}`}
-              className={`bubble ${m.from} anim-bubble`}
-              style={{ animationDelay: `${i * 0.12}s` }}
-            >
-              {m.text}
-            </div>
-          ))}
-        </div>
-        <div className="choice-list">
-          {(step.chat?.replies || []).map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className="btn"
-              onClick={() => {
-                onDecide(c, step)
-                setStepLocal({ ...stepLocal, picked: c })
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <ChatStep
+        step={step}
+        tip={tip}
+        stepLocal={stepLocal}
+        setStepLocal={setStepLocal}
+        onDecide={onDecide}
+        onNextStep={onNextStep}
+      />
     )
   }
 
@@ -393,4 +276,352 @@ function StepBody({
   )
 }
 
-export type { StepLocal }
+function HotspotStep({
+  step,
+  tip,
+  stageSrc,
+  stageAlt,
+  stepLocal,
+  setStepLocal,
+  onDecide,
+  onNextStep,
+}: {
+  step: SceneStep
+  tip: ReactNode
+  stageSrc: string
+  stageAlt: string
+  stepLocal: StepLocal
+  setStepLocal: Props['setStepLocal']
+  onDecide: Props['onDecide']
+  onNextStep: () => void
+}) {
+  const spots = step.hotspots || []
+  const need = spots.filter((h) => h.correct).length
+  const found = stepLocal.found || []
+  const good = spots.filter((h) => h.correct && found.includes(h.id)).length
+  const bad = spots.filter((h) => !h.correct && found.includes(h.id))
+  const tips = spots
+    .filter((h) => found.includes(h.id))
+    .map((h) => h.tip)
+    .join(' · ')
+
+  if (stepLocal.hotspotDone && stepLocal.picked) {
+    return (
+      <OutcomeBlock
+        choice={stepLocal.picked}
+        buttonLabel="Продолжить"
+        onNext={onNextStep}
+      />
+    )
+  }
+
+  const mark = (id: string) => {
+    if (found.includes(id)) return
+    playPlace()
+    setStepLocal({ ...stepLocal, found: found.concat(id) })
+  }
+
+  const finish = () => {
+    const choice = hotspotChoice(
+      step,
+      good,
+      need,
+      bad.map((h) => h.label),
+      bad.map((h) => h.tip).join(' '),
+      tips,
+    )
+    saveChoice(choice, step, onDecide, setStepLocal, { hotspotDone: true })
+  }
+
+  return (
+    <div className="stack anim-step">
+      {tip}
+      <p>{step.text}</p>
+      <div className="hotspot-stage">
+        <img className="hotspot-bg ken-burns" src={stageSrc} alt={stageAlt} />
+        {spots.map((h, i) => {
+          const isFound = found.includes(h.id)
+          let cls = 'hotspot hotspot-idle'
+          if (isFound) cls = h.correct ? 'hotspot good' : 'hotspot bad'
+
+          return (
+            <button
+              key={h.id}
+              type="button"
+              className={`${cls}${isFound ? ' anim-pop' : ''}`}
+              style={{
+                left: `${h.x}%`,
+                top: `${h.y}%`,
+                animationDelay: isFound ? undefined : `${i * 0.35}s`,
+              }}
+              onClick={() => mark(h.id)}
+            >
+              {h.label}
+            </button>
+          )
+        })}
+      </div>
+      <div className="hotspot-list" aria-label="Точки на сцене">
+        {spots.map((h) => {
+          const isFound = found.includes(h.id)
+          return (
+            <button
+              key={`list-${h.id}`}
+              type="button"
+              className={`btn hotspot-list-btn${isFound && h.correct ? ' safe' : ''}`}
+              disabled={isFound}
+              onClick={() => mark(h.id)}
+            >
+              {isFound ? (h.correct ? '✓ ' : '· ') : ''}
+              {h.label}
+            </button>
+          )
+        })}
+      </div>
+      {tips ? <p className="muted tip-fade">{tips}</p> : null}
+      <button
+        type="button"
+        className="btn primary"
+        disabled={found.length < 1}
+        onClick={finish}
+      >
+        Готово ({good}/{need}
+        {bad.length ? `, ошибок: ${bad.length}` : ''})
+      </button>
+    </div>
+  )
+}
+
+function ChecklistStep({
+  step,
+  tip,
+  stepLocal,
+  setStepLocal,
+  onDecide,
+  onNextStep,
+}: {
+  step: SceneStep
+  tip: ReactNode
+  stepLocal: StepLocal
+  setStepLocal: Props['setStepLocal']
+  onDecide: Props['onDecide']
+  onNextStep: () => void
+}) {
+  const items = step.checklist || []
+  const checked = stepLocal.checked || []
+
+  if (stepLocal.checklistDone && stepLocal.picked) {
+    return (
+      <OutcomeBlock
+        choice={stepLocal.picked}
+        buttonLabel="Продолжить"
+        onNext={onNextStep}
+      />
+    )
+  }
+
+  return (
+    <div className="stack anim-step">
+      {tip}
+      <p>{step.text}</p>
+      <div className="stack checklist">
+        {items.map((c, i) => (
+          <label
+            key={c.id}
+            className={`check-row${checked.includes(c.id) ? ' on' : ''}`}
+            style={{ animationDelay: `${i * 0.05}s` }}
+          >
+            <input
+              type="checkbox"
+              checked={checked.includes(c.id)}
+              onChange={(e) => {
+                playPlace()
+                const next = e.target.checked
+                  ? checked.concat(c.id)
+                  : checked.filter((x) => x !== c.id)
+                setStepLocal({ ...stepLocal, checked: next })
+              }}
+            />
+            <span>{c.label}</span>
+          </label>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn primary"
+        onClick={() => {
+          const choice = checklistChoice(step, checked)
+          saveChoice(choice, step, onDecide, setStepLocal, {
+            checklistDone: true,
+          })
+        }}
+      >
+        Подтвердить выбор
+      </button>
+    </div>
+  )
+}
+
+function SortStep({
+  step,
+  tip,
+  stepLocal,
+  setStepLocal,
+  onDecide,
+  onNextStep,
+}: {
+  step: SceneStep
+  tip: ReactNode
+  stepLocal: StepLocal
+  setStepLocal: Props['setStepLocal']
+  onDecide: Props['onDecide']
+  onNextStep: () => void
+}) {
+  if (stepLocal.sortDone && stepLocal.picked) {
+    return (
+      <OutcomeBlock
+        choice={stepLocal.picked}
+        buttonLabel="Дальше"
+        onNext={onNextStep}
+      />
+    )
+  }
+
+  const placed = stepLocal.placed || {}
+  const selected = stepLocal.selectedItem || null
+  const items = step.sort?.items || []
+  const bins = step.sort?.bins || []
+
+  return (
+    <div className="stack anim-step">
+      {tip}
+      <p>{step.text}</p>
+      <div className="stack sort-items">
+        {items
+          .filter((i) => !placed[i.id])
+          .map((i, idx) => (
+            <button
+              key={i.id}
+              type="button"
+              className={`sort-item choice-enter${selected === i.id ? ' bin active' : ''}`}
+              style={{ animationDelay: `${idx * 0.05}s` }}
+              onClick={() => {
+                playPlace()
+                setStepLocal({ ...stepLocal, selectedItem: i.id })
+              }}
+            >
+              {i.label}
+            </button>
+          ))}
+      </div>
+      <div className="bins">
+        {bins.map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            className={`bin${selected ? ' ready' : ''}`}
+            onClick={() => {
+              if (!selected) return
+              playPlace()
+              setStepLocal({
+                ...stepLocal,
+                placed: { ...placed, [selected]: b.id },
+                selectedItem: null,
+              })
+            }}
+          >
+            {b.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn primary"
+        disabled={Object.keys(placed).length < items.length}
+        onClick={() => {
+          const choice = sortChoice(step, placed)
+          saveChoice(choice, step, onDecide, setStepLocal, { sortDone: true })
+        }}
+      >
+        Проверить
+      </button>
+    </div>
+  )
+}
+
+function ChatStep({
+  step,
+  tip,
+  stepLocal,
+  setStepLocal,
+  onDecide,
+  onNextStep,
+}: {
+  step: SceneStep
+  tip: ReactNode
+  stepLocal: StepLocal
+  setStepLocal: Props['setStepLocal']
+  onDecide: Props['onDecide']
+  onNextStep: () => void
+}) {
+  if (stepLocal.picked) {
+    return (
+      <OutcomeBlock
+        choice={stepLocal.picked}
+        buttonLabel="Дальше"
+        onNext={onNextStep}
+      />
+    )
+  }
+
+  const messages = step.chat?.messages || []
+  const replies = step.chat?.replies || []
+  const msgCount = messages.length
+
+  return (
+    <div className="stack anim-step">
+      {tip}
+      <p>{step.text}</p>
+      <div className="chat">
+        <strong>{step.chat?.npcName}</strong>
+        {messages.map((m, i) => (
+          <div
+            key={`${m.from}-${i}`}
+            className={`bubble ${m.from} anim-bubble`}
+            style={{ animationDelay: `${0.15 + i * 0.22}s` }}
+          >
+            {m.text}
+          </div>
+        ))}
+        <div
+          className="typing-dots"
+          aria-hidden="true"
+          style={{ animationDelay: `${0.15 + msgCount * 0.22}s` }}
+        >
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+      <div className="choice-list chat-replies">
+        {replies.map((c, i) => (
+          <button
+            key={c.id}
+            type="button"
+            className="btn pickable choice-enter"
+            style={{
+              animationDelay: `${0.55 + msgCount * 0.22 + i * 0.07}s`,
+            }}
+            onClick={(e) => {
+              flashPick(e.currentTarget, 220, () => {
+                saveChoice(c, step, onDecide, setStepLocal)
+              })
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}

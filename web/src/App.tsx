@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { CityMap } from './components/CityMap'
+import { JournalView } from './components/JournalView'
 import { QuizView } from './components/QuizView'
-import { SceneView, type StepLocal } from './components/SceneView'
+import { SceneView } from './components/SceneView'
 import { Shell } from './components/Shell'
 import { Welcome } from './components/Welcome'
 import { loadCity } from './data/loadCity'
@@ -16,8 +17,57 @@ import type {
   CityData,
   ProgressState,
   SceneStep,
+  StepLocal,
   ViewId,
 } from './types'
+
+function getShellView(view: ViewId): ViewId {
+  if (view === 'scene') return 'map'
+  return view
+}
+
+function findNextScene(
+  city: CityData,
+  state: ProgressState,
+  sceneId: string,
+  endedDay: boolean,
+): string | null {
+  if (endedDay || state.dayFinished) return null
+
+  const meta = city.unlockAfter[sceneId]
+  let unlocked = state.unlockedLocations
+  if (meta) {
+    unlocked = Array.from(
+      new Set(state.unlockedLocations.concat(meta.unlock)),
+    )
+  }
+
+  const order = city.locations.map((l) => l.sceneId)
+  const start = order.indexOf(sceneId)
+  if (start < 0) return null
+
+  for (let i = start + 1; i < order.length; i++) {
+    const nextId = order[i]
+    const loc = city.locations.find((l) => l.sceneId === nextId)
+    if (!loc) continue
+    if (!unlocked.includes(loc.id)) continue
+    if (state.completedScenes.includes(nextId)) continue
+    return nextId
+  }
+
+  return null
+}
+
+function findFirstOpenScene(city: CityData, state: ProgressState) {
+  const open = city.locations.find(
+    (l) =>
+      state.unlockedLocations.includes(l.id) &&
+      !state.completedScenes.includes(l.sceneId),
+  )
+  if (open) return open
+
+  return city.locations.find((l) => state.unlockedLocations.includes(l.id))
+}
 
 export default function App() {
   const [city, setCity] = useState<CityData | null>(null)
@@ -86,19 +136,25 @@ export default function App() {
 
   const completeCurrentScene = () => {
     if (!city || !sceneId) return
+
     const meta = city.unlockAfter[sceneId] || {
       unlock: [] as string[],
       phase: state.phase,
     }
-    const nextCompleted = state.completedScenes.includes(sceneId)
-      ? state.completedScenes
-      : state.completedScenes.concat(sceneId)
+
+    let nextCompleted = state.completedScenes
+    if (!nextCompleted.includes(sceneId)) {
+      nextCompleted = nextCompleted.concat(sceneId)
+    }
+
     const unlocked = Array.from(
       new Set(state.unlockedLocations.concat(meta.unlock)),
     )
+
     const dayDone = city.locations.every((l) =>
       nextCompleted.includes(l.sceneId),
     )
+
     setEndedDay(dayDone)
     patch({
       completedScenes: nextCompleted,
@@ -159,7 +215,7 @@ export default function App() {
     )
   }
 
-  let body: React.ReactNode = null
+  let body: ReactNode = null
 
   if (view === 'map') {
     body = (
@@ -169,16 +225,11 @@ export default function App() {
         onName={(name) => patch({ playerName: name })}
         onOpenScene={openScene}
         onStartFirst={() => {
-          const first =
-            city.locations.find(
-              (l) =>
-                state.unlockedLocations.includes(l.id) &&
-                !state.completedScenes.includes(l.sceneId),
-            ) ||
-            city.locations.find((l) => state.unlockedLocations.includes(l.id))
+          const first = findFirstOpenScene(city, state)
           if (first) openScene(first.sceneId)
         }}
         onQuiz={() => setView('quiz')}
+        onJournal={() => setView('journal')}
         onRestart={startDay}
       />
     )
@@ -203,8 +254,9 @@ export default function App() {
         }}
         onNextStep={() => {
           const scene = city.scenes[sceneId]
-          if (stepIndex >= scene.steps.length - 1) completeCurrentScene()
-          else {
+          if (stepIndex >= scene.steps.length - 1) {
+            completeCurrentScene()
+          } else {
             setStepIndex((i) => i + 1)
             setStepLocal({})
           }
@@ -219,12 +271,15 @@ export default function App() {
         answers={quizAnswers}
         submitted={quizSubmitted}
         score={state.quizScore}
-        onAnswer={(id, idx) => setQuizAnswers((a) => ({ ...a, [id]: idx }))}
+        playerName={state.playerName}
+        onAnswer={(id, idx) =>
+          setQuizAnswers((prev) => ({ ...prev, [id]: idx }))
+        }
         onSubmit={() => {
-          const score = city.quiz.reduce(
-            (n, q) => n + (quizAnswers[q.id] === q.correct ? 1 : 0),
-            0,
-          )
+          let score = 0
+          for (const q of city.quiz) {
+            if (quizAnswers[q.id] === q.correct) score += 1
+          }
           setQuizSubmitted(true)
           patch({ quizScore: score })
         }}
@@ -232,40 +287,21 @@ export default function App() {
         onRestart={startDay}
       />
     )
+  } else if (view === 'journal') {
+    body = (
+      <JournalView city={city} state={state} onMap={() => setView('map')} />
+    )
   }
 
   return (
     <Shell
       city={city}
       state={state}
-      view={view === 'scene' ? 'map' : view}
+      view={getShellView(view)}
       onNav={(v) => setView(v)}
       onReset={resetAll}
     >
       {body}
     </Shell>
   )
-}
-
-function findNextScene(
-  city: CityData,
-  state: ProgressState,
-  sceneId: string,
-  endedDay: boolean,
-): string | null {
-  if (endedDay || state.dayFinished) return null
-  const meta = city.unlockAfter[sceneId]
-  const unlocked = meta
-    ? Array.from(new Set(state.unlockedLocations.concat(meta.unlock)))
-    : state.unlockedLocations
-  const order = city.locations.map((l) => l.sceneId)
-  const i = order.indexOf(sceneId)
-  if (i < 0) return null
-  for (let n = i + 1; n < order.length; n++) {
-    const nextId = order[n]
-    const loc = city.locations.find((l) => l.sceneId === nextId)
-    if (!loc) continue
-    if (unlocked.includes(loc.id)) return nextId
-  }
-  return null
 }
